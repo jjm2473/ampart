@@ -11,11 +11,14 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <linux/fs.h>
-
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+
+#ifndef __APPLE__
 #include <sys/sysmacros.h>
+#endif
+
+#include <libgen.h>
 
 /* Local */
 
@@ -24,6 +27,52 @@
 #include "ept.h"
 
 /* Function */
+
+#ifdef __linux__
+#include <linux/fs.h>
+
+static int blkgetsize(int fd, size_t *psize)
+{
+#ifdef BLKGETSIZE64
+  int ret = ioctl(fd, BLKGETSIZE64, psize);
+#elif BLKGETSIZE
+  unsigned long sectors = 0;
+  int ret = ioctl(fd, BLKGETSIZE, &sectors);
+  *psize = sectors * 512ULL;
+#else
+# error "Linux configuration error (blkgetsize)"
+#endif
+  return ret;
+}
+
+#elif defined(__APPLE__)
+#include <sys/disk.h>
+
+static int blkgetsize(int fd, size_t *psize)
+{
+  unsigned long blocksize = 0;
+  int ret = ioctl(fd, DKIOCGETBLOCKSIZE, &blocksize);
+  if (!ret) {
+    unsigned long nblocks;
+    ret = ioctl(fd, DKIOCGETBLOCKCOUNT, &nblocks);
+    if (!ret)
+      *psize = (size_t)nblocks * blocksize;
+  }
+  return ret;
+}
+
+#elif defined(__FreeBSD__)
+#include <sys/disk.h>
+
+static int blkgetsize(int fd, size_t *psize)
+{
+  int ret = ioctl(fd, DIOCGMEDIASIZE, psize);
+  return ret;
+}
+
+#else
+# error "Unable to query block device size: unsupported platform, please report."
+#endif
 
 static inline
 bool 
@@ -189,7 +238,7 @@ io_identify_target_type_get_basic_stat(
     if (S_ISBLK(st.st_mode)) {
         pr_error("IO identify target type: '%s' is a block device, getting its size via ioctl\n", path);
         type->file = IO_TARGET_TYPE_FILE_BLOCKDEVICE;
-        if (ioctl(fd, BLKGETSIZE64, &type->size)) {
+        if (blkgetsize(fd, &type->size)) {
             pr_error("IO identify target type: Failed to get size of '%s' via ioctl, errno: %d, error: %s\n", path, errno, strerror(errno));
             return 2;
         }
@@ -507,11 +556,13 @@ io_rereadpart(
         pr_error("IO rereadpart: File descriptor not greater than 0 (%d), give up\n", fd);
         return -1;
     }
+#ifdef __linux__
     if (ioctl(fd, BLKRRPART) == -1) {
         pr_error("IO rereadpart: Failed to send ioctl BLKRRPART to kernel, errno: %d, error: %s\n", errno, strerror(errno));
         return 1;
     }
     fputs("IO rereadpart: success\n", stderr);
+#endif
     return 0;
 }
 

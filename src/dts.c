@@ -4,7 +4,7 @@
 
 /* System */
 
-#include <byteswap.h>
+#include "compat_byteswap.h"
 #include <string.h>
 
 /* Local */

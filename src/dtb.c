@@ -4,7 +4,8 @@
 
 /* System */
 
-#include <byteswap.h>
+#include "compat_byteswap.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
